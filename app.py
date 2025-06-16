@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,148 +6,144 @@ from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 import numpy as np
 
-st.set_page_config(page_title="Futbol Antrenman Analizi", layout="wide", page_icon="⚽")
-
-# --- STİL ---
-
-st.markdown("""
+# Sayfa ayarları ve futbol temalı CSS
+st.set_page_config(page_title="⚽ Futbol Veri Analizi", layout="wide")
+st.markdown(
+    """
     <style>
-    .main {
-        background: linear-gradient(135deg, #004080, #1e90ff);
-        color: white;
+    body {
+        background-color: #0b3d91;  /* Koyu mavi stad teması */
+        color: #f5f5f5;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        padding: 20px;
     }
+    .css-1d391kg {background-color: #004d1a;} /* Sidebar koyu yeşil */
     .stButton>button {
-        background-color: #1e90ff;
+        background-color: #008000;
         color: white;
         font-weight: bold;
     }
-    .css-1aumxhk {
-        color: white !important;
+    h1, h2, h3 {
+        color: #ffd700; /* Altın sarısı */
+        text-align: center;
+        text-shadow: 1px 1px 2px black;
+    }
+    .stDataFrame table {
+        background-color: #003300;
+        color: #cfc;
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True
+)
 
-# --- BAŞLIK ---
+# Başlık
+st.title("⚽ Futbolcu Antrenman Analizi")
 
-st.title("⚽ Futbol Antrenman Performans Analizi")
-st.markdown("**Oyuncu verilerini yükleyin, antrenman performansını anında görün!**")
-st.markdown("---")
+# Dosya yükleme
+uploaded_file = st.sidebar.file_uploader("📂 CSV Dosyasını Yükle", type=["csv"])
+csv_text = None
+if uploaded_file is None:
+    csv_text = st.sidebar.text_area("📋 Veya CSV metnini buraya yapıştır")
 
-# --- VERİ YÜKLEME ---
-
-data_option = st.radio("Veri yükleme seçeneği:", ("CSV Dosyası Yükle", "CSV Metni Yapıştır"))
-
+# Veri okuma
 df = None
-if data_option == "CSV Dosyası Yükle":
-    uploaded_file = st.file_uploader("CSV dosyanı seç (örn: player_mehmet.csv)", type=["csv"])
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-elif data_option == "CSV Metni Yapıştır":
-    csv_text = st.text_area("CSV verisini buraya yapıştır")
-    if csv_text.strip() != "":
-        from io import StringIO
-        df = pd.read_csv(StringIO(csv_text))
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+elif csv_text and csv_text.strip() != "":
+    from io import StringIO
+    df = pd.read_csv(StringIO(csv_text))
 
 if df is not None:
-    st.success(f"Veri başarıyla yüklendi! Toplam {len(df)} kayıt.")
-
-    # Temel veri işlemleri
+    # Zamanı datetime yap
     if 'datetime' in df.columns:
         df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
     else:
-        st.error("Veride 'datetime' sütunu bulunamadı!")
-    
+        st.error("Veride 'datetime' sütunu bulunamadı.")
+        st.stop()
+
+    # Oyuncu adı varsa göster
     player_name = df.get('player', ['Bilinmiyor'])[0] if 'player' in df.columns else "Bilinmiyor"
-    st.header(f"🏅 Oyuncu: {player_name}")
+    st.subheader(f"👤 Oyuncu: {player_name}")
 
-    # Temel özetler
-    st.subheader("🏃‍♂️ Antrenman Özeti")
-    
-    # Mesafe tahmini (basit, GPS verisinden)
+    # İvme temel istatistikler
+    st.markdown("### 📊 İvme İstatistikleri")
+    st.dataframe(df[['accX','accY','accZ']].describe().round(2))
+
+    # İvme grafiği
+    st.markdown("### 📈 İvme Zaman Grafiği")
+    fig, ax = plt.subplots(figsize=(10,4))
+    ax.plot(df['datetime'], df['accX'], label='accX')
+    ax.plot(df['datetime'], df['accY'], label='accY')
+    ax.plot(df['datetime'], df['accZ'], label='accZ')
+    ax.legend()
+    ax.set_xlabel("Zaman")
+    ax.set_ylabel("İvme")
+    ax.set_title("Oyuncu İvme Verileri")
+    st.pyplot(fig)
+
+    # GPS harita ve ısı haritası
     if 'lat' in df.columns and 'lon' in df.columns:
-        coords = df[['lat', 'lon']].dropna().values
-        def haversine(lat1, lon1, lat2, lon2):
-            from math import radians, cos, sin, asin, sqrt
-            R = 6371e3  # metre
-            phi1, phi2 = radians(lat1), radians(lat2)
-            dphi = radians(lat2 - lat1)
-            dlambda = radians(lon2 - lon1)
-            a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
-            c = 2*asin(sqrt(a))
-            return R * c
-
-        total_distance = 0
-        for i in range(1, len(coords)):
-            total_distance += haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1])
-        total_distance_km = total_distance / 1000
-        st.metric("Toplam Koşulan Mesafe", f"{total_distance_km:.2f} km")
-    else:
-        st.warning("GPS (lat, lon) verileri bulunamadı, mesafe hesaplanamıyor.")
-
-    # Ortalama ve maksimum hız (varsa)
-    if 'speed' in df.columns:
-        avg_speed = df['speed'].mean()
-        max_speed = df['speed'].max()
-        st.metric("Ortalama Hız", f"{avg_speed:.2f} m/s")
-        st.metric("Maksimum Hız", f"{max_speed:.2f} m/s")
-    else:
-        st.info("Hız (speed) verisi bulunamadı.")
-
-    # İvme analizi
-    st.subheader("📊 İvme Analizi")
-    if all(col in df.columns for col in ['accX', 'accY', 'accZ']):
-        df['total_acc'] = np.sqrt(df['accX']**2 + df['accY']**2 + df['accZ']**2)
-        st.metric("Ortalama İvme", f"{df['total_acc'].mean():.2f} m/s²")
-        st.metric("Maksimum İvme", f"{df['total_acc'].max():.2f} m/s²")
-
-        # Grafik
-        fig, ax = plt.subplots(figsize=(10,4))
-        ax.plot(df['datetime'], df['accX'], label='accX')
-        ax.plot(df['datetime'], df['accY'], label='accY')
-        ax.plot(df['datetime'], df['accZ'], label='accZ')
-        ax.set_xlabel("Zaman")
-        ax.set_ylabel("İvme (m/s²)")
-        ax.legend()
-        st.pyplot(fig)
-    else:
-        st.info("İvme (accX, accY, accZ) verileri eksik.")
-
-    # Koşu ve Zıplama tahmini (örnek: ivme toplamından threshold ile)
-    st.subheader("⚡ Antrenman Hareketleri")
-
-    if 'total_acc' not in df.columns and all(col in df.columns for col in ['accX', 'accY', 'accZ']):
-        df['total_acc'] = np.sqrt(df['accX']**2 + df['accY']**2 + df['accZ']**2)
-
-    if 'total_acc' in df.columns:
-        # Basit zıplama/hızlanma tahmini: ivme 2.5 m/s² üzeri anlar
-        jump_events = df[df['total_acc'] > 2.5]
-        st.metric("Tahmini Zıplama/Hızlanma Sayısı", len(jump_events))
-
-        fig2, ax2 = plt.subplots(figsize=(10,3))
-        ax2.plot(df['datetime'], df['total_acc'], label='Toplam İvme', color='orange')
-        ax2.axhline(2.5, color='red', linestyle='--', label='Eşik (2.5 m/s²)')
-        ax2.set_ylabel("İvme (m/s²)")
-        ax2.legend()
-        st.pyplot(fig2)
-    else:
-        st.info("Toplam ivme verisi bulunamadı, hareket analizi yapılamıyor.")
-
-    # GPS rotası ve ısı haritası
-    if 'lat' in df.columns and 'lon' in df.columns:
-        st.subheader("🗺️ Antrenman GPS Rotası ve Isı Haritası")
+        st.markdown("### 🗺️ GPS Rotası ve Isı Haritası")
         start_lat, start_lon = df['lat'].mean(), df['lon'].mean()
         gps_map = folium.Map(location=[start_lat, start_lon], zoom_start=17)
         points = df[['lat', 'lon']].dropna().values.tolist()
-        folium.PolyLine(points, color="blue", weight=4).add_to(gps_map)
-        folium.Marker(points[0], popup="Başlangıç").add_to(gps_map)
-        folium.Marker(points[-1], popup="Bitiş").add_to(gps_map)
+        folium.PolyLine(points, color="yellow", weight=4).add_to(gps_map)
+        folium.Marker(points[0], popup="Başlangıç", icon=folium.Icon(color='green')).add_to(gps_map)
+        folium.Marker(points[-1], popup="Bitiş", icon=folium.Icon(color='red')).add_to(gps_map)
         st_folium(gps_map, width=700, height=400)
 
         heat_map = folium.Map(location=[start_lat, start_lon], zoom_start=17)
-        HeatMap(points).add_to(heat_map)
+        HeatMap(points, radius=15, blur=10).add_to(heat_map)
         st_folium(heat_map, width=700, height=400)
 
+    # ---- Analiz & Yorum Bölümü ----
+    st.markdown("### 📝 Analiz & Yorum")
+
+    # Örnek analiz fonksiyonu
+    def analyze_data(df):
+        yorumlar = []
+
+        # Toplam süre
+        total_seconds = (df['datetime'].iloc[-1] - df['datetime'].iloc[0]).total_seconds()
+        yorumlar.append(f"🏃‍♂️ Toplam antrenman süresi: {int(total_seconds//60)} dakika.")
+
+        # Ortalama hız tahmini (basit, GPS noktaları arası ortalama hız)
+        if 'lat' in df.columns and 'lon' in df.columns:
+            from geopy.distance import geodesic
+            toplam_mesafe = 0
+            for i in range(1, len(df)):
+                p1 = (df['lat'].iloc[i-1], df['lon'].iloc[i-1])
+                p2 = (df['lat'].iloc[i], df['lon'].iloc[i])
+                toplam_mesafe += geodesic(p1, p2).meters
+            ort_hiz = toplam_mesafe / total_seconds if total_seconds > 0 else 0
+            yorumlar.append(f"⚡ Ortalama hız yaklaşık {ort_hiz:.2f} m/s.")
+
+        # Yorulma tahmini (ivme düşüşü veya duraklama analizi)
+        acc_magnitude = np.sqrt(df['accX']**2 + df['accY']**2 + df['accZ']**2)
+        acc_mean = acc_magnitude.mean()
+        if acc_mean > 1.2:
+            yorumlar.append("🔥 Oyuncu antrenmanda oldukça dinamik ve tempolu koştu.")
+        elif acc_mean > 0.8:
+            yorumlar.append("😊 Oyuncu orta tempoda antrenman yaptı, gayet dengeli.")
+        else:
+            yorumlar.append("😴 Oyuncu antrenmanda düşük tempoda veya dinlenme modundaydı.")
+
+        # Duraklamalar (ivme çok düşük anlar)
+        duraklama_sayisi = (acc_magnitude < 0.3).sum()
+        if duraklama_sayisi > total_seconds * 0.1:
+            yorumlar.append("⏸️ Oyuncu antrenman süresince sık sık durakladı veya yavaşladı.")
+
+        # Örnek bölgesel yorum (en çok nerede durdu?)
+        if 'lat' in df.columns and 'lon' in df.columns:
+            # En çok vakit geçirilen nokta (yoğunluk)
+            lat_mode = df['lat'].mode().iloc[0]
+            lon_mode = df['lon'].mode().iloc[0]
+            yorumlar.append(f"📍 Oyuncu en çok {lat_mode:.5f}, {lon_mode:.5f} koordinatlarında zaman geçirdi.")
+
+        return "\n\n".join(yorumlar)
+
+    yorum_metni = analyze_data(df)
+    st.text_area("Analiz ve Yorumlar", value=yorum_metni, height=200)
+
 else:
-    st.info("Lütfen soldaki menüden veri yükleyin (CSV dosyası veya metin).")
+    st.info("Lütfen sol menüden CSV dosyası yükleyin veya veriyi yapıştırın.")
