@@ -5,25 +5,25 @@ import folium
 from streamlit_folium import st_folium
 from folium.plugins import HeatMap
 import numpy as np
+from geopy.distance import geodesic
 
-# Sayfa ayarları ve futbol temalı CSS
-st.set_page_config(page_title="⚽ Futbol Veri Analizi", layout="wide")
+st.set_page_config(page_title="⚽ Futbolcu Antrenman Analizi", layout="wide")
 st.markdown(
     """
     <style>
     body {
-        background-color: #0b3d91;  /* Koyu mavi stad teması */
+        background-color: #0b3d91;
         color: #f5f5f5;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-    .css-1d391kg {background-color: #004d1a;} /* Sidebar koyu yeşil */
+    .css-1d391kg {background-color: #004d1a;}
     .stButton>button {
         background-color: #008000;
         color: white;
         font-weight: bold;
     }
     h1, h2, h3 {
-        color: #ffd700; /* Altın sarısı */
+        color: #ffd700;
         text-align: center;
         text-shadow: 1px 1px 2px black;
     }
@@ -36,16 +36,13 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Başlık
 st.title("⚽ Futbolcu Antrenman Analizi")
 
-# Dosya yükleme
 uploaded_file = st.sidebar.file_uploader("📂 CSV Dosyasını Yükle", type=["csv"])
 csv_text = None
 if uploaded_file is None:
     csv_text = st.sidebar.text_area("📋 Veya CSV metnini buraya yapıştır")
 
-# Veri okuma
 df = None
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -54,22 +51,18 @@ elif csv_text and csv_text.strip() != "":
     df = pd.read_csv(StringIO(csv_text))
 
 if df is not None:
-    # Zamanı datetime yap
     if 'datetime' in df.columns:
         df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
     else:
         st.error("Veride 'datetime' sütunu bulunamadı.")
         st.stop()
 
-    # Oyuncu adı varsa göster
     player_name = df.get('player', ['Bilinmiyor'])[0] if 'player' in df.columns else "Bilinmiyor"
     st.subheader(f"👤 Oyuncu: {player_name}")
 
-    # İvme temel istatistikler
     st.markdown("### 📊 İvme İstatistikleri")
     st.dataframe(df[['accX','accY','accZ']].describe().round(2))
 
-    # İvme grafiği
     st.markdown("### 📈 İvme Zaman Grafiği")
     fig, ax = plt.subplots(figsize=(10,4))
     ax.plot(df['datetime'], df['accX'], label='accX')
@@ -81,7 +74,6 @@ if df is not None:
     ax.set_title("Oyuncu İvme Verileri")
     st.pyplot(fig)
 
-    # GPS harita ve ısı haritası
     if 'lat' in df.columns and 'lon' in df.columns:
         st.markdown("### 🗺️ GPS Rotası ve Isı Haritası")
         start_lat, start_lon = df['lat'].mean(), df['lon'].mean()
@@ -96,54 +88,56 @@ if df is not None:
         HeatMap(points, radius=15, blur=10).add_to(heat_map)
         st_folium(heat_map, width=700, height=400)
 
-    # ---- Analiz & Yorum Bölümü ----
-    st.markdown("### 📝 Analiz & Yorum")
+    st.markdown("### 📝 Antrenörün Yorumları")
 
-    # Örnek analiz fonksiyonu
-    def analyze_data(df):
-        yorumlar = []
+    def coach_style_comments(df):
+        comments = []
+        total_time_sec = (df['datetime'].iloc[-1] - df['datetime'].iloc[0]).total_seconds()
+        total_min = int(total_time_sec // 60)
 
-        # Toplam süre
-        total_seconds = (df['datetime'].iloc[-1] - df['datetime'].iloc[0]).total_seconds()
-        yorumlar.append(f"🏃‍♂️ Toplam antrenman süresi: {int(total_seconds//60)} dakika.")
+        comments.append(f"Antrenmanın toplam süresi yaklaşık {total_min} dakika.")
 
-        # Ortalama hız tahmini (basit, GPS noktaları arası ortalama hız)
+        # Mesafe hesapla
         if 'lat' in df.columns and 'lon' in df.columns:
-            from geopy.distance import geodesic
-            toplam_mesafe = 0
+            distance = 0
             for i in range(1, len(df)):
                 p1 = (df['lat'].iloc[i-1], df['lon'].iloc[i-1])
                 p2 = (df['lat'].iloc[i], df['lon'].iloc[i])
-                toplam_mesafe += geodesic(p1, p2).meters
-            ort_hiz = toplam_mesafe / total_seconds if total_seconds > 0 else 0
-            yorumlar.append(f"⚡ Ortalama hız yaklaşık {ort_hiz:.2f} m/s.")
+                distance += geodesic(p1, p2).meters
+            km = distance / 1000
+            comments.append(f"Bu sürede yaklaşık {km:.2f} kilometre koştun.")
 
-        # Yorulma tahmini (ivme düşüşü veya duraklama analizi)
-        acc_magnitude = np.sqrt(df['accX']**2 + df['accY']**2 + df['accZ']**2)
-        acc_mean = acc_magnitude.mean()
-        if acc_mean > 1.2:
-            yorumlar.append("🔥 Oyuncu antrenmanda oldukça dinamik ve tempolu koştu.")
-        elif acc_mean > 0.8:
-            yorumlar.append("😊 Oyuncu orta tempoda antrenman yaptı, gayet dengeli.")
+            ort_hiz = distance / total_time_sec if total_time_sec > 0 else 0
+            comments.append(f"Ortalama hızın saniyede {ort_hiz:.2f} metre, yani iyi bir tempoyla oynuyorsun.")
+
+        # İvme (hareketlilik) durumu
+        acc = np.sqrt(df['accX']**2 + df['accY']**2 + df['accZ']**2)
+        ort_acc = acc.mean()
+
+        if ort_acc > 1.2:
+            comments.append("Maçta ve antrenmanda oldukça hareketlisin, bu iyi bir enerji işareti.")
+        elif ort_acc > 0.8:
+            comments.append("Hareketlerin dengeli, biraz daha tempolu olabilirsin.")
         else:
-            yorumlar.append("😴 Oyuncu antrenmanda düşük tempoda veya dinlenme modundaydı.")
+            comments.append("Hareketlerin düşük görünüyor, biraz daha aktif olman gerek.")
 
-        # Duraklamalar (ivme çok düşük anlar)
-        duraklama_sayisi = (acc_magnitude < 0.3).sum()
-        if duraklama_sayisi > total_seconds * 0.1:
-            yorumlar.append("⏸️ Oyuncu antrenman süresince sık sık durakladı veya yavaşladı.")
+        # Duraklama kontrolü
+        duraklama_say = (acc < 0.3).sum()
+        if duraklama_say > total_time_sec * 0.1:
+            comments.append("Antrenman sırasında sık sık duraksadığını fark ettim, dayanıklılığını artırmaya çalış.")
 
-        # Örnek bölgesel yorum (en çok nerede durdu?)
+        # Bölgesel yorum
         if 'lat' in df.columns and 'lon' in df.columns:
-            # En çok vakit geçirilen nokta (yoğunluk)
-            lat_mode = df['lat'].mode().iloc[0]
-            lon_mode = df['lon'].mode().iloc[0]
-            yorumlar.append(f"📍 Oyuncu en çok {lat_mode:.5f}, {lon_mode:.5f} koordinatlarında zaman geçirdi.")
+            lat_mode = df['lat'].mode()[0]
+            lon_mode = df['lon'].mode()[0]
+            comments.append(f"En çok vakit geçirdiğin yer: yaklaşık ({lat_mode:.5f}, {lon_mode:.5f}). Burada daha hareketli olmaya çalış.")
 
-        return "\n\n".join(yorumlar)
+        comments.append("Genel olarak iyi gidiyorsun, ama dayanıklılık ve tempoyu biraz daha geliştirmelisin. Devam!")
 
-    yorum_metni = analyze_data(df)
-    st.text_area("Analiz ve Yorumlar", value=yorum_metni, height=200)
+        return "\n\n".join(comments)
+
+    yorumlar = coach_style_comments(df)
+    st.text_area("Oyuncuya Antrenör Yorumu", value=yorumlar, height=250)
 
 else:
     st.info("Lütfen sol menüden CSV dosyası yükleyin veya veriyi yapıştırın.")
